@@ -1,0 +1,25 @@
+.nav-btn {
+  color: #94a3b8;
+}
+.nav-btn.active {
+  color: #4f46e5;
+}
+.view {
+  animation: fadeIn 0.15s ease-in;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.priority-Low { background:#e0f2fe; color:#0369a1; }
+.priority-Medium { background:#fef3c7; color:#92400e; }
+.priority-High { background:#fee2e2; color:#b91c1c; }
+
+.status-pending { background:#fef3c7; color:#92400e; }
+.status-completed { background:#dcfce7; color:#166534; }
+.status-overdue { background:#fee2e2; color:#b91c1c; }
+
+@media (min-width: 768px) {
+  main { padding-bottom: 2rem; }
+  nav.fixed { position: static; border-top: none; margin-top: 2rem; }
+}
