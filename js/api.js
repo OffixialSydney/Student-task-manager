@@ -3,8 +3,8 @@
 // loaded in index.html. The anon key below is safe to expose in frontend code —
 // it only allows whatever your Row Level Security policy permits.
 
-const SUPABASE_URL = "https://YOUR-PROJECT-ref.supabase.co";
-const SUPABASE_ANON_KEY = "your-anon-public-key";
+const SUPABASE_URL = "https://atjveqvfolcynlllchcm.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0anZlcXZmb2xjeW5sbGxjaGNtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4NDI5NDAsImV4cCI6MjEwNTQxODk0MH0.M5ylygwuI2NW3naTdMcrsBqavbRcm8nN6AwCQz9vq1s";
 
 const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
