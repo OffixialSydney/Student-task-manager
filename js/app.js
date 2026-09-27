@@ -1,7 +1,8 @@
 // app.js
 // Main application logic for the Student Task Manager.
-// Now backed by a real API (see api.js) instead of localStorage, so every
-// function that reads or writes tasks is async and awaits its result.
+// Backed by Supabase via api.js. This version adds: toast messages instead of
+// alert(), a custom delete-confirmation modal instead of confirm(), loading
+// states while data is fetched, and disabled buttons while requests are in flight.
 
 let editingId = null;
 let currentView = "dashboard";
@@ -43,17 +44,63 @@ function subjectColorIndex(subject) {
   return hash % 6;
 }
 
-function handleError(err) {
-  console.error(err);
-  alert(err.message || "Something went wrong talking to the server. Is it running?");
-}
-
 const ICONS = {
   check: `<svg viewBox="0 0 24 24" fill="none"><path d="M5 12.5L10 17.5L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   undo: `<svg viewBox="0 0 24 24" fill="none"><path d="M7 9L4 12L7 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 12H14.5C17 12 19 14 19 16.5C19 19 17 21 14.5 21H10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   edit: `<svg viewBox="0 0 24 24" fill="none"><path d="M14.5 5.5L18.5 9.5L8 20H4V16L14.5 5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`,
   trash: `<svg viewBox="0 0 24 24" fill="none"><path d="M5 7H19M9 7V5C9 4.4 9.4 4 10 4H14C14.6 4 15 4.4 15 5V7M17 7L16.3 19C16.2 19.6 15.7 20 15.1 20H8.9C8.3 20 7.8 19.6 7.7 19L7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 };
+
+function loadingBlock(message) {
+  return `<div class="loading-block"><div class="spinner"></div><p>${message}</p></div>`;
+}
+
+// ---------- Toast ----------
+
+let toastTimer = null;
+
+function showToast(message, type = "error") {
+  const toast = document.getElementById("toast");
+  document.getElementById("toast-message").textContent = message;
+  toast.dataset.type = type;
+  toast.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.add("hidden"), 3500);
+}
+
+function handleError(err) {
+  console.error(err);
+  showToast(err.message || "Something went wrong. Check your connection and try again.", "error");
+}
+
+// ---------- Custom confirm dialog (replaces browser confirm()) ----------
+
+function showConfirm(title, message) {
+  const modal = document.getElementById("confirm-modal");
+  document.getElementById("confirm-title").textContent = title;
+  document.getElementById("confirm-message").textContent = message;
+  modal.classList.remove("hidden");
+
+  return new Promise((resolve) => {
+    const cleanup = (result) => {
+      modal.classList.add("hidden");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      modal.removeEventListener("click", onOverlay);
+      resolve(result);
+    };
+    const okBtn = document.getElementById("confirm-ok");
+    const cancelBtn = document.getElementById("confirm-cancel");
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    const onOverlay = (e) => {
+      if (e.target === modal) cleanup(false);
+    };
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    modal.addEventListener("click", onOverlay);
+  });
+}
 
 // ---------- Navigation ----------
 
@@ -88,6 +135,9 @@ document.getElementById("addTaskTopBtn").addEventListener("click", () => {
 // ---------- Dashboard ----------
 
 async function renderDashboard() {
+  const container = document.getElementById("recent-tasks");
+  container.innerHTML = loadingBlock("Loading dashboard…");
+
   const tasks = await Storage.getAll();
   const total = tasks.length;
   const completed = tasks.filter((t) => t.completed).length;
@@ -104,7 +154,6 @@ async function renderDashboard() {
 
   const recent = [...tasks].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
 
-  const container = document.getElementById("recent-tasks");
   container.innerHTML = "";
 
   if (recent.length === 0) {
@@ -175,6 +224,7 @@ function buildTaskCard(task) {
     try {
       await Storage.update(task.id, { completed: !task.completed });
       await renderTasks();
+      showToast(task.completed ? "Task reopened" : "Task marked done", "success");
     } catch (err) {
       handleError(err);
     }
@@ -185,14 +235,15 @@ function buildTaskCard(task) {
   });
   card.querySelector(".action-delete").addEventListener("click", async (e) => {
     e.stopPropagation();
-    if (confirm(`Delete "${task.title}"?`)) {
-      try {
-        await Storage.remove(task.id);
-        await renderTasks();
-        await renderDashboard();
-      } catch (err) {
-        handleError(err);
-      }
+    const ok = await showConfirm("Delete task", `Delete "${task.title}"? This can't be undone.`);
+    if (!ok) return;
+    try {
+      await Storage.remove(task.id);
+      await renderTasks();
+      await renderDashboard();
+      showToast("Task deleted", "success");
+    } catch (err) {
+      handleError(err);
     }
   });
 
@@ -201,10 +252,9 @@ function buildTaskCard(task) {
 
 // ---------- Tasks list, search & filter ----------
 
-async function populateSubjectFilter() {
+async function populateSubjectFilter(tasks) {
   const select = document.getElementById("filter-subject");
   const current = select.value;
-  const tasks = await Storage.getAll();
   const subjects = [...new Set(tasks.map((t) => t.subject).filter(Boolean))].sort();
   select.innerHTML = `<option value="">Any subject</option>` +
     subjects.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
@@ -212,14 +262,20 @@ async function populateSubjectFilter() {
 }
 
 async function renderTasks() {
-  await populateSubjectFilter();
+  const list = document.getElementById("task-list");
+  const empty = document.getElementById("empty-state");
+  empty.classList.add("hidden");
+  list.innerHTML = loadingBlock("Loading tasks…");
+
+  const allTasks = await Storage.getAll();
+  await populateSubjectFilter(allTasks);
 
   const search = document.getElementById("search-input").value.trim().toLowerCase();
   const statusFilter = document.getElementById("filter-status").value;
   const priorityFilter = document.getElementById("filter-priority").value;
   const subjectFilter = document.getElementById("filter-subject").value;
 
-  let tasks = await Storage.getAll();
+  let tasks = allTasks;
 
   if (search) {
     tasks = tasks.filter(
@@ -234,8 +290,6 @@ async function renderTasks() {
 
   tasks.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
-  const list = document.getElementById("task-list");
-  const empty = document.getElementById("empty-state");
   list.innerHTML = "";
 
   if (tasks.length === 0) {
@@ -307,6 +361,7 @@ document.getElementById("details-modal").addEventListener("click", (e) => {
 // ---------- Add / Edit Form ----------
 
 const form = document.getElementById("task-form");
+const saveBtn = form.querySelector('button[type="submit"]');
 
 function resetForm() {
   editingId = null;
@@ -372,6 +427,10 @@ form.addEventListener("submit", async (e) => {
     dueDate: document.getElementById("f-due").value,
   };
 
+  const wasEditing = !!editingId;
+  saveBtn.disabled = true;
+  saveBtn.textContent = "Saving…";
+
   try {
     if (editingId) {
       await Storage.update(editingId, data);
@@ -381,8 +440,12 @@ form.addEventListener("submit", async (e) => {
     editingId = null;
     resetForm();
     await switchView("tasks");
+    showToast(wasEditing ? "Task updated" : "Task added", "success");
   } catch (err) {
     handleError(err);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = "Save task";
   }
 });
 
