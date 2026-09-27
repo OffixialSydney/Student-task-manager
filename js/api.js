@@ -1,44 +1,78 @@
 // api.js
-// Talks to the backend REST API (server/index.js) instead of localStorage.
-// Change API_BASE once your server is deployed (e.g. your Render/Railway URL).
+// Talks directly to Supabase's built-in REST API using the Supabase JS client
+// loaded in index.html. The anon key below is safe to expose in frontend code —
+// it only allows whatever your Row Level Security policy permits.
 
-const API_BASE = "http://localhost:4000/api";
+const SUPABASE_URL = "https://YOUR-PROJECT-ref.supabase.co";
+const SUPABASE_ANON_KEY = "your-anon-public-key";
 
-async function request(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Request failed: ${res.status}`);
-  }
-  return res.status === 204 ? null : res.json();
+const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const TABLE = "tasks";
+
+// Supabase row (snake_case) -> object the app expects (camelCase)
+function toApi(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description || "",
+    subject: row.subject,
+    priority: row.priority,
+    dueDate: row.due_date,
+    completed: row.completed,
+    createdAt: new Date(row.created_at).getTime(),
+  };
 }
 
-// Same method names as the old localStorage version, kept as "Storage"
-// so nothing else needs renaming — but every method now returns a Promise.
+// App object (camelCase) -> Supabase row (snake_case)
+function toDb(task) {
+  const row = {};
+  if (task.title !== undefined) row.title = task.title;
+  if (task.description !== undefined) row.description = task.description;
+  if (task.subject !== undefined) row.subject = task.subject;
+  if (task.priority !== undefined) row.priority = task.priority;
+  if (task.dueDate !== undefined) row.due_date = task.dueDate;
+  if (task.completed !== undefined) row.completed = task.completed;
+  return row;
+}
+
+// Same method names as before, so app.js needs zero changes.
 const Storage = {
-  getAll() {
-    return request("/tasks");
+  async getAll() {
+    const { data, error } = await client
+      .from(TABLE)
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return data.map(toApi);
   },
-  getById(id) {
-    return request(`/tasks/${id}`);
+
+  async getById(id) {
+    const { data, error } = await client.from(TABLE).select("*").eq("id", id).single();
+    if (error) throw new Error(error.message);
+    return toApi(data);
   },
-  add(task) {
-    // The server assigns id, completed, and createdAt — just send the form fields.
-    return request("/tasks", {
-      method: "POST",
-      body: JSON.stringify(task),
-    });
+
+  async add(task) {
+    const { data, error } = await client.from(TABLE).insert(toDb(task)).select().single();
+    if (error) throw new Error(error.message);
+    return toApi(data);
   },
-  update(id, updates) {
-    return request(`/tasks/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(updates),
-    });
+
+  async update(id, updates) {
+    const { data, error } = await client
+      .from(TABLE)
+      .update(toDb(updates))
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return toApi(data);
   },
-  remove(id) {
-    return request(`/tasks/${id}`, { method: "DELETE" });
+
+  async remove(id) {
+    const { error } = await client.from(TABLE).delete().eq("id", id);
+    if (error) throw new Error(error.message);
+    return { success: true };
   },
 };
