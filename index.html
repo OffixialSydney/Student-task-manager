@@ -178,6 +178,11 @@
 
   </main>
 
+  <!-- Toast (for error / success messages) -->
+  <div id="toast" class="toast hidden">
+    <span id="toast-message"></span>
+  </div>
+
   <!-- Task Details Modal -->
   <div id="details-modal" class="modal-overlay hidden">
     <div class="modal-sheet">
@@ -187,6 +192,18 @@
         </svg>
       </button>
       <div id="details-content"></div>
+    </div>
+  </div>
+
+  <!-- Delete confirmation modal -->
+  <div id="confirm-modal" class="modal-overlay hidden">
+    <div class="modal-sheet modal-sheet-sm">
+      <h3 class="details-title" id="confirm-title">Delete task</h3>
+      <p class="confirm-message" id="confirm-message">This can't be undone.</p>
+      <div class="details-actions">
+        <button id="confirm-cancel" class="btn-secondary btn-block">Cancel</button>
+        <button id="confirm-ok" class="btn-danger btn-block">Delete</button>
+      </div>
     </div>
   </div>
 
@@ -206,9 +223,8 @@
     </button>
   </nav>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="js/api.js"></script>
-<script src="js/app.js"></script>
-
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
