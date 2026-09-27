@@ -1,7 +1,7 @@
 // app.js
 // Main application logic for the Student Task Manager.
-
-Storage.seedIfEmpty();
+// Now backed by a real API (see api.js) instead of localStorage, so every
+// function that reads or writes tasks is async and awaits its result.
 
 let editingId = null;
 let currentView = "dashboard";
@@ -34,7 +34,6 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-// Deterministic color index per subject name, used for the small dot / card tab.
 function subjectColorIndex(subject) {
   const s = subject || "";
   let hash = 0;
@@ -42,6 +41,11 @@ function subjectColorIndex(subject) {
     hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
   }
   return hash % 6;
+}
+
+function handleError(err) {
+  console.error(err);
+  alert(err.message || "Something went wrong talking to the server. Is it running?");
 }
 
 const ICONS = {
@@ -53,7 +57,7 @@ const ICONS = {
 
 // ---------- Navigation ----------
 
-function switchView(view) {
+async function switchView(view) {
   currentView = view;
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
   document.getElementById(`view-${view}`).classList.remove("hidden");
@@ -62,9 +66,13 @@ function switchView(view) {
     btn.classList.toggle("active", btn.dataset.view === view);
   });
 
-  if (view === "dashboard") renderDashboard();
-  if (view === "tasks") renderTasks();
-  if (view === "add" && !editingId) resetForm();
+  try {
+    if (view === "dashboard") await renderDashboard();
+    if (view === "tasks") await renderTasks();
+    if (view === "add" && !editingId) resetForm();
+  } catch (err) {
+    handleError(err);
+  }
 }
 
 document.querySelectorAll(".nav-btn").forEach((btn) => {
@@ -79,8 +87,8 @@ document.getElementById("addTaskTopBtn").addEventListener("click", () => {
 
 // ---------- Dashboard ----------
 
-function renderDashboard() {
-  const tasks = Storage.getAll();
+async function renderDashboard() {
+  const tasks = await Storage.getAll();
   const total = tasks.length;
   const completed = tasks.filter((t) => t.completed).length;
   const overdue = tasks.filter((t) => getStatus(t) === "overdue").length;
@@ -162,21 +170,29 @@ function buildTaskCard(task) {
     openDetails(task.id);
   });
 
-  card.querySelector(".action-complete").addEventListener("click", (e) => {
+  card.querySelector(".action-complete").addEventListener("click", async (e) => {
     e.stopPropagation();
-    Storage.update(task.id, { completed: !task.completed });
-    renderTasks();
+    try {
+      await Storage.update(task.id, { completed: !task.completed });
+      await renderTasks();
+    } catch (err) {
+      handleError(err);
+    }
   });
   card.querySelector(".action-edit").addEventListener("click", (e) => {
     e.stopPropagation();
     startEdit(task.id);
   });
-  card.querySelector(".action-delete").addEventListener("click", (e) => {
+  card.querySelector(".action-delete").addEventListener("click", async (e) => {
     e.stopPropagation();
     if (confirm(`Delete "${task.title}"?`)) {
-      Storage.remove(task.id);
-      renderTasks();
-      renderDashboard();
+      try {
+        await Storage.remove(task.id);
+        await renderTasks();
+        await renderDashboard();
+      } catch (err) {
+        handleError(err);
+      }
     }
   });
 
@@ -185,24 +201,25 @@ function buildTaskCard(task) {
 
 // ---------- Tasks list, search & filter ----------
 
-function populateSubjectFilter() {
+async function populateSubjectFilter() {
   const select = document.getElementById("filter-subject");
   const current = select.value;
-  const subjects = [...new Set(Storage.getAll().map((t) => t.subject).filter(Boolean))].sort();
+  const tasks = await Storage.getAll();
+  const subjects = [...new Set(tasks.map((t) => t.subject).filter(Boolean))].sort();
   select.innerHTML = `<option value="">Any subject</option>` +
     subjects.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
   select.value = current;
 }
 
-function renderTasks() {
-  populateSubjectFilter();
+async function renderTasks() {
+  await populateSubjectFilter();
 
   const search = document.getElementById("search-input").value.trim().toLowerCase();
   const statusFilter = document.getElementById("filter-status").value;
   const priorityFilter = document.getElementById("filter-priority").value;
   const subjectFilter = document.getElementById("filter-subject").value;
 
-  let tasks = Storage.getAll();
+  let tasks = await Storage.getAll();
 
   if (search) {
     tasks = tasks.filter(
@@ -230,15 +247,19 @@ function renderTasks() {
 }
 
 ["search-input", "filter-status", "filter-priority", "filter-subject"].forEach((id) => {
-  document.getElementById(id).addEventListener("input", renderTasks);
-  document.getElementById(id).addEventListener("change", renderTasks);
+  document.getElementById(id).addEventListener("input", () => renderTasks().catch(handleError));
+  document.getElementById(id).addEventListener("change", () => renderTasks().catch(handleError));
 });
 
 // ---------- Task Details Modal ----------
 
-function openDetails(id) {
-  const task = Storage.getById(id);
-  if (!task) return;
+async function openDetails(id) {
+  let task;
+  try {
+    task = await Storage.getById(id);
+  } catch (err) {
+    return handleError(err);
+  }
   const status = getStatus(task);
 
   document.getElementById("details-content").innerHTML = `
@@ -262,11 +283,15 @@ function openDetails(id) {
     closeDetails();
     startEdit(task.id);
   };
-  document.getElementById("details-complete").onclick = () => {
-    Storage.update(task.id, { completed: !task.completed });
-    closeDetails();
-    renderTasks();
-    renderDashboard();
+  document.getElementById("details-complete").onclick = async () => {
+    try {
+      await Storage.update(task.id, { completed: !task.completed });
+      closeDetails();
+      await renderTasks();
+      await renderDashboard();
+    } catch (err) {
+      handleError(err);
+    }
   };
 }
 
@@ -291,9 +316,13 @@ function resetForm() {
   clearErrors();
 }
 
-function startEdit(id) {
-  const task = Storage.getById(id);
-  if (!task) return;
+async function startEdit(id) {
+  let task;
+  try {
+    task = await Storage.getById(id);
+  } catch (err) {
+    return handleError(err);
+  }
   editingId = id;
   document.getElementById("form-title").textContent = "Edit task";
   document.getElementById("task-id").value = task.id;
@@ -331,7 +360,7 @@ function validateForm() {
   return valid;
 }
 
-form.addEventListener("submit", (e) => {
+form.addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!validateForm()) return;
 
@@ -343,20 +372,18 @@ form.addEventListener("submit", (e) => {
     dueDate: document.getElementById("f-due").value,
   };
 
-  if (editingId) {
-    Storage.update(editingId, data);
-  } else {
-    Storage.add({
-      id: crypto.randomUUID(),
-      completed: false,
-      createdAt: Date.now(),
-      ...data,
-    });
+  try {
+    if (editingId) {
+      await Storage.update(editingId, data);
+    } else {
+      await Storage.add(data);
+    }
+    editingId = null;
+    resetForm();
+    await switchView("tasks");
+  } catch (err) {
+    handleError(err);
   }
-
-  editingId = null;
-  resetForm();
-  switchView("tasks");
 });
 
 document.getElementById("cancel-form-btn").addEventListener("click", () => {
