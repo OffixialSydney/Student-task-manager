@@ -34,6 +34,23 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// Deterministic color index per subject name, used for the small dot / card tab.
+function subjectColorIndex(subject) {
+  const s = subject || "";
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) {
+    hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+  }
+  return hash % 6;
+}
+
+const ICONS = {
+  check: `<svg viewBox="0 0 24 24" fill="none"><path d="M5 12.5L10 17.5L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  undo: `<svg viewBox="0 0 24 24" fill="none"><path d="M7 9L4 12L7 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 12H14.5C17 12 19 14 19 16.5C19 19 17 21 14.5 21H10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  edit: `<svg viewBox="0 0 24 24" fill="none"><path d="M14.5 5.5L18.5 9.5L8 20H4V16L14.5 5.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`,
+  trash: `<svg viewBox="0 0 24 24" fill="none"><path d="M5 7H19M9 7V5C9 4.4 9.4 4 10 4H14C14.6 4 15 4.4 15 5V7M17 7L16.3 19C16.2 19.6 15.7 20 15.1 20H8.9C8.3 20 7.8 19.6 7.7 19L7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+};
+
 // ---------- Navigation ----------
 
 function switchView(view) {
@@ -77,52 +94,67 @@ function renderDashboard() {
   document.getElementById("progress-bar").style.width = `${progress}%`;
   document.getElementById("progress-label").textContent = `${progress}%`;
 
-  const recent = [...tasks]
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, 5);
+  const recent = [...tasks].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
 
   const container = document.getElementById("recent-tasks");
   container.innerHTML = "";
+
   if (recent.length === 0) {
-    container.innerHTML = `<p class="text-sm text-slate-400">No tasks yet. Add your first task!</p>`;
+    container.innerHTML = `<p class="recent-empty">No tasks yet — add your first one.</p>`;
     return;
   }
+
   recent.forEach((task) => {
-    container.appendChild(buildTaskCard(task, { compact: true }));
+    const status = getStatus(task);
+    const row = document.createElement("div");
+    row.className = "recent-row";
+    row.innerHTML = `
+      <div class="recent-main">
+        <p class="recent-title ${task.completed ? "is-done" : ""}">${escapeHtml(task.title)}</p>
+        <p class="recent-meta">
+          <span class="subject-dot subject-${subjectColorIndex(task.subject)}"></span>${escapeHtml(task.subject)} &middot; Due ${formatDate(task.dueDate)}
+        </p>
+      </div>
+      <span class="badge status-${status}">${status}</span>
+    `;
+    row.addEventListener("click", () => openDetails(task.id));
+    container.appendChild(row);
   });
 }
 
 // ---------- Task Card ----------
 
-function buildTaskCard(task, opts = {}) {
+const TAB_COLORS = ["var(--blue)", "var(--green)", "var(--gold)", "var(--red)", "#7c5cbf", "#2a8c82"];
+
+function buildTaskCard(task) {
   const status = getStatus(task);
+  const colorIdx = subjectColorIndex(task.subject);
+
   const card = document.createElement("div");
-  card.className =
-    "bg-white rounded-xl shadow-sm border border-slate-200 p-3 flex flex-col gap-2 cursor-pointer";
+  card.className = "task-card";
   card.dataset.id = task.id;
 
   card.innerHTML = `
-    <div class="flex items-start justify-between gap-2">
-      <div class="min-w-0">
-        <p class="font-medium truncate ${task.completed ? "line-through text-slate-400" : ""}">${escapeHtml(task.title)}</p>
-        <p class="text-xs text-slate-500 truncate">${escapeHtml(task.subject)} &middot; Due ${formatDate(task.dueDate)}</p>
+    <div class="task-card-tab" style="background:${TAB_COLORS[colorIdx]}"></div>
+    <div class="task-card-body">
+      <div class="task-card-top">
+        <div class="min-w-0">
+          <p class="task-title ${task.completed ? "is-done" : ""}">${escapeHtml(task.title)}</p>
+          <p class="task-meta">
+            <span class="subject-dot subject-${colorIdx}"></span>${escapeHtml(task.subject)} &middot; Due <span class="due-mono">${formatDate(task.dueDate)}</span>
+          </p>
+        </div>
+        <div class="badge-row">
+          <span class="badge priority-${task.priority}">${task.priority}</span>
+          <span class="badge status-${status}">${status}</span>
+        </div>
       </div>
-      <div class="flex flex-col items-end gap-1 shrink-0">
-        <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full priority-${task.priority}">${task.priority}</span>
-        <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full status-${status}">${status}</span>
+      <div class="task-actions">
+        <button class="action-btn action-complete">${task.completed ? ICONS.undo : ICONS.check}${task.completed ? "Reopen" : "Done"}</button>
+        <button class="action-btn action-edit">${ICONS.edit}Edit</button>
+        <button class="action-btn action-delete">${ICONS.trash}Delete</button>
       </div>
     </div>
-    ${
-      opts.compact
-        ? ""
-        : `<div class="flex gap-2 pt-1 text-xs">
-            <button class="btn-complete flex-1 border border-emerald-200 text-emerald-700 rounded-lg py-1.5">
-              ${task.completed ? "Mark Pending" : "Mark Done"}
-            </button>
-            <button class="btn-edit flex-1 border border-slate-200 text-slate-600 rounded-lg py-1.5">Edit</button>
-            <button class="btn-delete flex-1 border border-rose-200 text-rose-600 rounded-lg py-1.5">Delete</button>
-          </div>`
-    }
   `;
 
   card.addEventListener("click", (e) => {
@@ -130,25 +162,23 @@ function buildTaskCard(task, opts = {}) {
     openDetails(task.id);
   });
 
-  if (!opts.compact) {
-    card.querySelector(".btn-complete").addEventListener("click", (e) => {
-      e.stopPropagation();
-      Storage.update(task.id, { completed: !task.completed });
+  card.querySelector(".action-complete").addEventListener("click", (e) => {
+    e.stopPropagation();
+    Storage.update(task.id, { completed: !task.completed });
+    renderTasks();
+  });
+  card.querySelector(".action-edit").addEventListener("click", (e) => {
+    e.stopPropagation();
+    startEdit(task.id);
+  });
+  card.querySelector(".action-delete").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (confirm(`Delete "${task.title}"?`)) {
+      Storage.remove(task.id);
       renderTasks();
-    });
-    card.querySelector(".btn-edit").addEventListener("click", (e) => {
-      e.stopPropagation();
-      startEdit(task.id);
-    });
-    card.querySelector(".btn-delete").addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (confirm(`Delete "${task.title}"?`)) {
-        Storage.remove(task.id);
-        renderTasks();
-        renderDashboard();
-      }
-    });
-  }
+      renderDashboard();
+    }
+  });
 
   return card;
 }
@@ -159,7 +189,7 @@ function populateSubjectFilter() {
   const select = document.getElementById("filter-subject");
   const current = select.value;
   const subjects = [...new Set(Storage.getAll().map((t) => t.subject).filter(Boolean))].sort();
-  select.innerHTML = `<option value="">All Subjects</option>` +
+  select.innerHTML = `<option value="">Any subject</option>` +
     subjects.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
   select.value = current;
 }
@@ -212,19 +242,17 @@ function openDetails(id) {
   const status = getStatus(task);
 
   document.getElementById("details-content").innerHTML = `
-    <h3 class="text-lg font-bold mb-1">${escapeHtml(task.title)}</h3>
-    <div class="flex gap-2 mb-3">
-      <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full priority-${task.priority}">${task.priority} priority</span>
-      <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full status-${status}">${status}</span>
+    <h3 class="details-title">${escapeHtml(task.title)}</h3>
+    <div class="details-badges">
+      <span class="badge priority-${task.priority}">${task.priority} priority</span>
+      <span class="badge status-${status}">${status}</span>
     </div>
-    <p class="text-sm text-slate-500 mb-1"><strong>Subject:</strong> ${escapeHtml(task.subject)}</p>
-    <p class="text-sm text-slate-500 mb-1"><strong>Due:</strong> ${formatDate(task.dueDate)}</p>
-    <p class="text-sm text-slate-700 mt-3 whitespace-pre-wrap">${escapeHtml(task.description) || "<span class='text-slate-400'>No description.</span>"}</p>
-    <div class="flex gap-2 mt-5">
-      <button id="details-edit" class="flex-1 bg-indigo-600 text-white rounded-lg py-2 text-sm">Edit</button>
-      <button id="details-complete" class="flex-1 border border-slate-300 rounded-lg py-2 text-sm">
-        ${task.completed ? "Mark Pending" : "Mark Done"}
-      </button>
+    <p class="details-row"><strong>Subject:</strong> ${escapeHtml(task.subject)}</p>
+    <p class="details-row"><strong>Due:</strong> ${formatDate(task.dueDate)}</p>
+    <p class="details-desc">${escapeHtml(task.description) || "No description."}</p>
+    <div class="details-actions">
+      <button id="details-edit" class="btn-primary btn-block">Edit</button>
+      <button id="details-complete" class="btn-secondary btn-block">${task.completed ? "Mark pending" : "Mark done"}</button>
     </div>
   `;
 
@@ -257,7 +285,7 @@ const form = document.getElementById("task-form");
 
 function resetForm() {
   editingId = null;
-  document.getElementById("form-title").textContent = "Add Task";
+  document.getElementById("form-title").textContent = "Add task";
   form.reset();
   document.getElementById("f-priority").value = "Medium";
   clearErrors();
@@ -267,7 +295,7 @@ function startEdit(id) {
   const task = Storage.getById(id);
   if (!task) return;
   editingId = id;
-  document.getElementById("form-title").textContent = "Edit Task";
+  document.getElementById("form-title").textContent = "Edit task";
   document.getElementById("task-id").value = task.id;
   document.getElementById("f-title").value = task.title;
   document.getElementById("f-description").value = task.description || "";
@@ -279,16 +307,15 @@ function startEdit(id) {
 }
 
 function clearErrors() {
-  document.querySelectorAll(".error-msg").forEach((e) => e.classList.add("hidden"));
-  document.querySelectorAll("#task-form input, #task-form textarea").forEach((el) =>
-    el.classList.remove("border-rose-500")
+  document.querySelectorAll(".field-error").forEach((e) => e.classList.remove("show"));
+  document.querySelectorAll("#task-form .field-input").forEach((el) =>
+    el.classList.remove("has-error")
   );
 }
 
 function showError(fieldId) {
-  const field = document.getElementById(fieldId);
-  field.classList.add("border-rose-500");
-  document.querySelector(`.error-msg[data-for="${fieldId}"]`)?.classList.remove("hidden");
+  document.getElementById(fieldId).classList.add("has-error");
+  document.querySelector(`.field-error[data-for="${fieldId}"]`)?.classList.add("show");
 }
 
 function validateForm() {
@@ -298,18 +325,9 @@ function validateForm() {
   const subject = document.getElementById("f-subject").value.trim();
   const due = document.getElementById("f-due").value;
 
-  if (!title) {
-    showError("f-title");
-    valid = false;
-  }
-  if (!subject) {
-    showError("f-subject");
-    valid = false;
-  }
-  if (!due) {
-    showError("f-due");
-    valid = false;
-  }
+  if (!title) { showError("f-title"); valid = false; }
+  if (!subject) { showError("f-subject"); valid = false; }
+  if (!due) { showError("f-due"); valid = false; }
   return valid;
 }
 
