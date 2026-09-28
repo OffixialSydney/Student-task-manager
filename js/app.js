@@ -10,7 +10,10 @@ let currentView = "dashboard";
 // ---------- Helpers ----------
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 function getStatus(task) {
@@ -102,6 +105,166 @@ function showConfirm(title, message) {
   });
 }
 
+// ---------- Due-date alerts ----------
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DISMISS_KEY = "stm_alerts_dismissed";
+const NOTIFIED_KEY = "stm_notified";
+
+// Whole days from today until the due date (negative = overdue).
+function daysUntil(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const due = new Date(y, m - 1, d);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((due - today) / DAY_MS);
+}
+
+function alertLabel(days) {
+  if (days < 0) return days === -1 ? "Overdue by 1 day" : `Overdue by ${-days} days`;
+  if (days === 0) return "Due today";
+  return "Due tomorrow";
+}
+
+function alertTone(days) {
+  if (days < 0) return "overdue";
+  if (days === 0) return "today";
+  return "soon";
+}
+
+// Unfinished tasks that are overdue, due today, or due tomorrow.
+function getUrgentTasks(tasks) {
+  return tasks
+    .filter((t) => !t.completed && daysUntil(t.dueDate) <= 1)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+}
+
+function notificationsSupported() {
+  return "Notification" in window;
+}
+
+async function enableNotifications() {
+  if (!notificationsSupported()) {
+    showToast("This browser doesn't support notifications.", "error");
+    return;
+  }
+  const result = await Notification.requestPermission();
+  if (result === "granted") {
+    showToast("Notifications turned on", "success");
+    refreshAlerts();
+  } else {
+    showToast("Notifications were not allowed.", "error");
+  }
+}
+
+// Pops a browser notification once per task per day (overdue + due today only).
+function fireDueNotifications(urgent) {
+  if (!notificationsSupported() || Notification.permission !== "granted") return;
+
+  let seen = {};
+  try {
+    seen = JSON.parse(localStorage.getItem(NOTIFIED_KEY) || "{}");
+  } catch (e) {
+    seen = {};
+  }
+
+  const today = todayStr();
+  Object.keys(seen).forEach((k) => {
+    if (!k.endsWith(`:${today}`)) delete seen[k];
+  });
+
+  urgent.forEach((t) => {
+    const days = daysUntil(t.dueDate);
+    if (days > 0) return;
+    const key = `${t.id}:${today}`;
+    if (seen[key]) return;
+    seen[key] = true;
+    try {
+      new Notification(`${alertLabel(days)}: ${t.title}`, { body: t.subject });
+    } catch (e) {
+      // Some mobile browsers don't allow this; the in-app panel still works.
+    }
+  });
+
+  try {
+    localStorage.setItem(NOTIFIED_KEY, JSON.stringify(seen));
+  } catch (e) {}
+}
+
+function updateDueAlerts(tasks) {
+  const panel = document.getElementById("due-alerts");
+  const urgent = getUrgentTasks(tasks);
+
+  fireDueNotifications(urgent);
+
+  const signature = urgent.map((t) => t.id).join(",");
+  let dismissed = null;
+  try {
+    dismissed = sessionStorage.getItem(DISMISS_KEY);
+  } catch (e) {}
+
+  if (urgent.length === 0 || dismissed === signature) {
+    panel.classList.add("hidden");
+    return;
+  }
+
+  const shown = urgent.slice(0, 5);
+  const extra = urgent.length - shown.length;
+  const worst = Math.min(...urgent.map((t) => daysUntil(t.dueDate)));
+  const canAskPermission = notificationsSupported() && Notification.permission === "default";
+
+  panel.dataset.tone = alertTone(worst);
+  panel.innerHTML = `
+    <div class="alert-head">
+      <p class="alert-title">Needs your attention (${urgent.length})</p>
+      <button class="alert-dismiss" aria-label="Dismiss alerts">&times;</button>
+    </div>
+    ${shown
+      .map((t) => {
+        const days = daysUntil(t.dueDate);
+        return `
+        <button class="alert-row" data-id="${t.id}">
+          <div class="alert-row-main">
+            <p class="alert-row-title">${escapeHtml(t.title)}</p>
+            <p class="alert-row-sub">${escapeHtml(t.subject)}</p>
+          </div>
+          <span class="alert-tag alert-tag-${alertTone(days)}">${alertLabel(days)}</span>
+        </button>`;
+      })
+      .join("")}
+    ${extra > 0 ? `<p class="alert-more">+${extra} more — see the Tasks page</p>` : ""}
+    ${canAskPermission ? `<button class="alert-notify">Turn on notifications</button>` : ""}
+  `;
+  panel.classList.remove("hidden");
+
+  panel.querySelector(".alert-dismiss").addEventListener("click", () => {
+    try {
+      sessionStorage.setItem(DISMISS_KEY, signature);
+    } catch (e) {}
+    panel.classList.add("hidden");
+  });
+  panel.querySelectorAll(".alert-row").forEach((row) => {
+    row.addEventListener("click", () => openDetails(row.dataset.id));
+  });
+  const notifyBtn = panel.querySelector(".alert-notify");
+  if (notifyBtn) notifyBtn.addEventListener("click", enableNotifications);
+}
+
+// Re-fetches tasks and refreshes the alerts (used by the timer and tab refocus).
+async function refreshAlerts() {
+  try {
+    const tasks = await Storage.getAll();
+    updateDueAlerts(tasks);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+setInterval(refreshAlerts, 5 * 60 * 1000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshAlerts();
+});
+
 // ---------- Navigation ----------
 
 async function switchView(view) {
@@ -139,6 +302,7 @@ async function renderDashboard() {
   container.innerHTML = loadingBlock("Loading dashboard…");
 
   const tasks = await Storage.getAll();
+  updateDueAlerts(tasks);
   const total = tasks.length;
   const completed = tasks.filter((t) => t.completed).length;
   const overdue = tasks.filter((t) => getStatus(t) === "overdue").length;
@@ -268,6 +432,7 @@ async function renderTasks() {
   list.innerHTML = loadingBlock("Loading tasks…");
 
   const allTasks = await Storage.getAll();
+  updateDueAlerts(allTasks);
   await populateSubjectFilter(allTasks);
 
   const search = document.getElementById("search-input").value.trim().toLowerCase();
