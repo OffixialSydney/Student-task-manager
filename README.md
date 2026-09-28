@@ -1,4 +1,4 @@
-# Coursework — Student Task Manager
+# Coursework Student Task Manager
 
 A mobile-first web app that helps students create, organize, and track school assignments and other tasks.
 
@@ -8,11 +8,11 @@ Coursework lets a student keep every assignment in one place. Tasks have a title
 
 ## Live Link
 
-https://YOUR-PROJECT.vercel.app
+https://student-task-manager-2a4dgy3yo-sydney17.vercel.app/
 
 ## GitHub Repository
 
-https://github.com/YOUR-USERNAME/student-task-manager
+https://github.com/OffixialSydney/student-task-manager
 
 ## Features
 
